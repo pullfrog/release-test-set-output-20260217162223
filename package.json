@@ -1,7 +1,7 @@
 {
   "name": "release-test-set-output-20260217162223",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "e2e test repo for pullfrog changelog releases",
   "license": "MIT"
 }
