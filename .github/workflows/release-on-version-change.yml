@@ -1,12 +1,9 @@
-name: release on version change
+name: release on tag push
 
 on:
   push:
-    branches:
-      - main
-    paths:
-      - package.json
-  workflow_dispatch:
+    tags:
+      - "v*"
 
 permissions:
   id-token: write
@@ -24,76 +21,29 @@ jobs:
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
-
-      - name: detect version change
-        id: version
-        uses: actions/github-script@v8
-        with:
-          script: |
-            const fs = require("node:fs");
-            const childProcess = require("node:child_process");
-            const packageJson = JSON.parse(fs.readFileSync("package.json", "utf8"));
-            const current = String(packageJson.version ?? "");
-            let previous = "";
-
-            try {
-              const previousPackageJson = childProcess.execSync("git show HEAD^:package.json", {
-                encoding: "utf8",
-              });
-              const previousPackage = JSON.parse(previousPackageJson);
-              previous = String(previousPackage.version ?? "");
-            } catch {}
-
-            const changed = previous === "" || current !== previous;
-            core.setOutput("current", current);
-            core.setOutput("previous", previous);
-            core.setOutput("changed", String(changed));
-            core.info(`current=${current} previous=${previous} changed=${changed}`);
-
-      - name: check for existing release tag
-        id: release_exists
-        if: steps.version.outputs.changed == 'true'
-        uses: actions/github-script@v8
-        with:
-          script: |
-            const tag = "v${{ steps.version.outputs.current }}";
-            let exists = false;
-            try {
-              await github.rest.repos.getReleaseByTag({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                tag,
-              });
-              exists = true;
-            } catch (error) {
-              if (error.status !== 404) {
-                throw error;
-              }
-            }
-            core.setOutput("exists", String(exists));
-            core.info(`tag=${tag} exists=${exists}`);
+          fetch-tags: true
 
       - name: generate changelog with pullfrog
         id: changelog
-        if: steps.version.outputs.changed == 'true' && steps.release_exists.outputs.exists != 'true'
         uses: pullfrog/pullfrog@main
         with:
           agent: codex
           effort: auto
           timeout: 20m
           prompt: |
-            Generate the release changelog markdown for version v${{ steps.version.outputs.current }}.
-            Previous version from package.json is "${{ steps.version.outputs.previous }}".
+            Generate the release changelog markdown for tag ${{ github.ref_name }}.
 
             Requirements:
-            - Read git history and summarize notable changes.
+            - Use git cli to determine the previous release tag and the diff/range since that tag.
+            - Use git cli output to summarize notable changes.
+            - If there is no previous release tag, summarize the full history up to this tag.
             - Keep output concise and factual.
             - Output valid markdown for a GitHub Release body.
             - Include these exact headings:
               ## highlights
               ## changes
             - Do not wrap the output in code fences.
-            - call gh_pullfrog/set_output exactly once with the full markdown body.
+            - Return the full markdown body and set it as output.
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -106,9 +56,8 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
 
       - name: create GitHub release
-        if: steps.version.outputs.changed == 'true' && steps.release_exists.outputs.exists != 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ steps.version.outputs.current }}
-          name: v${{ steps.version.outputs.current }}
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
           body: ${{ steps.changelog.outputs.result }}
